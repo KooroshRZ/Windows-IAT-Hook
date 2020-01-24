@@ -1,30 +1,48 @@
 #include "IATHook.h"
 
 
-BOOL APIENTRY DllMain(HMODULE hModule,
-	DWORD ul_reason_for_call,
-	LPVOID lpReserved
-) {
-	
-	switch (ul_reason_for_call)
+BOOL APIENTRY DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID lpReserved)
+{
+	if (dwReason == DLL_PROCESS_ATTACH)
 	{
-	case DLL_PROCESS_ATTACH:
-		//MessageBox(0, "Hello I'm DLL injected inside you !!!", "DLL_PROCESS_ATTACH", MB_ICONINFORMATION);
-		//LogMessage("Hello I'm DLL injected inside you in DLL_PROCESS_ATTACH mode!!!");
-		//exit(1);
-		StartHook();
-		break;
+		//HookFunction((char*)"GetCurrentProcessId", (PSIZE_T)&HookedGetCurrentProcessId);
+		HookFunction((char*)"TerminateProcess", (PSIZE_T)&HookedTerminateProcess);
 	}
-
+	return TRUE;
 }
 
-DWORD ModifiedFunc() {
+void HookFunction(char* funcName, PSIZE_T function)
+{
+	PSIZE_T pOldFunction = FindFunctionAddress(funcName);
 
-	return 100000;
+	DWORD accessProtectionValue, accessProtec;
 
+	int vProtect = VirtualProtect(pOldFunction, sizeof(PSIZE_T), PAGE_EXECUTE_READWRITE, &accessProtectionValue);
+
+	//*pOldFunction = (SIZE_T)((PSIZE_T)&HookedGetCurrentProcessId);
+	*pOldFunction = (SIZE_T)function;
+
+	vProtect = VirtualProtect(pOldFunction, sizeof(PSIZE_T), accessProtectionValue, &accessProtec);
 }
 
-void StartHook() {
+int WINAPI HookedGetCurrentProcessId(VOID)
+{
+	//return MessageBoxA(hWnd, "Hello", "DLL answering here!", uType);
+	return 10000;
+}
+
+bool WINAPI
+HookedTerminateProcess(
+	_In_ HANDLE hProcess,
+	_In_ UINT uExitCode
+) {
+	MessageBox(0, "FUCK OFF !!!", "...", MB_ICONINFORMATION);
+	return false;
+}
+
+PSIZE_T FindFunctionAddress(char* funcName)
+{
+	
 	MODULEINFO modInfo;
 	HMODULE hMod = GetModuleHandle(0);
 
@@ -47,39 +65,32 @@ void StartHook() {
 	printf("IMPORT_DIRECTORY_TABLE address %p\n\n", (void*)(pIID));
 	//system("PAUSE");
 
-	for (; pIID->Characteristics; pIID++) 
+	for (; pIID->Characteristics; pIID++)
 		if (!strcmp("KERNEL32.dll", (char*)(lpAddress + pIID->Name))) {
 			printf("IMPORT DIRECROTY ENTRY : %s\n", (char*)(lpAddress + pIID->Name));
 			break;
 		}
-			
-	
 
-	PIMAGE_THUNK_DATA pITDN = (PIMAGE_THUNK_DATA)(lpAddress + pIID->OriginalFirstThunk); // ILT
-	PIMAGE_THUNK_DATA pITDA = (PIMAGE_THUNK_DATA)(lpAddress + pIID->FirstThunk); // IAT
 
-	for (; pITDN->u1.AddressOfData; pITDN++) {
+
+	PIMAGE_THUNK_DATA	pITDN = (PIMAGE_THUNK_DATA)(lpAddress + pIID->OriginalFirstThunk); // ILT
+	PIMAGE_THUNK_DATA	pITDA = (PIMAGE_THUNK_DATA)(lpAddress + pIID->FirstThunk); // IAT
+	PSIZE_T				pOldFunction = nullptr;
+
+
+
+	do {
 		PIMAGE_IMPORT_BY_NAME pIIBN = (PIMAGE_IMPORT_BY_NAME)(lpAddress + pITDN->u1.AddressOfData);
 		if (!strcmp("GetCurrentProcessId", (char*)pIIBN->Name)) {
-			printf("	%s with address : \n", (char*)pIIBN->Name);
-			Sleep(2000);
-			break;
+
+			pOldFunction = (PSIZE_T)&(pITDA->u1.Function);
+			printf("\n\npITDA->u1.Function   :    %p", pITDA->u1.Function);
+			printf("\n	---> %s was found with address : 0x%p\n\n", (char*)pIIBN->Name, *pOldFunction);
+			return pOldFunction;
 		}
-			
 		pITDA++;
-	}
+		pITDN++;
+	} while (pITDN->u1.AddressOfData);
 
-	//Sleep(200000);
-
-
-	DWORD dwOLD = NULL;
-	VirtualProtect((LPVOID)&(pITDA->u1.Function), sizeof(DWORD), PAGE_READWRITE, &dwOLD);
-	pITDA->u1.Function = (SIZE_T)HookedGetCurrentProcessId;
-	VirtualProtect((LPVOID)&(pITDA->u1.Function), sizeof(DWORD), dwOLD, NULL);
-
-}
-
-DWORD HookedGetCurrentProcessId(VOID) {
-	printf("\n\nentered\n\n");
-	return 10000;
+	return 0;
 }
